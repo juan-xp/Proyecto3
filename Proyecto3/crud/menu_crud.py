@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from models import Menu
+from models import Menu, Ingrediente
 from typing import Optional, List, Dict
 
 class MenuCRUD:
@@ -9,19 +9,59 @@ class MenuCRUD:
                    categoria: str = None, disponible: bool = True, 
                    receta: Dict[str, float] = None) -> Optional[Menu]:
         try:
+            # Validar nombre no vacío
+            if not nombre or not nombre.strip():
+                raise ValueError("El nombre del menú no puede estar vacío")
+            
+            # Validar precio
+            if precio <= 0:
+                raise ValueError("El precio debe ser mayor que cero")
+            
+            # Validar receta si existe
+            if receta:
+                # Verificar ingredientes duplicados
+                ingredientes_vistos = set()
+                for ingrediente, cantidad in receta.items():
+                    if not ingrediente or not ingrediente.strip():
+                        raise ValueError("Nombre de ingrediente vacío en la receta")
+                    
+                    ingrediente_lower = ingrediente.lower()
+                    if ingrediente_lower in ingredientes_vistos:
+                        raise ValueError(f"El ingrediente '{ingrediente}' está duplicado en la receta")
+                    ingredientes_vistos.add(ingrediente_lower)
+                    
+                    # Validar cantidades
+                    if cantidad <= 0:
+                        raise ValueError(f"La cantidad del ingrediente '{ingrediente}' debe ser mayor que cero")
+                    
+                    # Validar que el ingrediente exista en la base de datos
+                    ingrediente_db = db.query(Ingrediente).filter(
+                        Ingrediente.nombre == ingrediente
+                    ).first()
+                    if not ingrediente_db:
+                        raise ValueError(f"El ingrediente '{ingrediente}' no existe en la base de datos")
+                    
+                    # Validar que tenga stock suficiente
+                    if ingrediente_db.stock < cantidad:
+                        raise ValueError(
+                            f"Stock insuficiente para '{ingrediente}'. "
+                            f"Disponible: {ingrediente_db.stock} {ingrediente_db.unidad}, "
+                            f"Requerido: {cantidad} {ingrediente_db.unidad}"
+                        )
+            
             nuevo_menu = Menu(
-                nombre=nombre,
-                descripcion=descripcion,
+                nombre=nombre.strip(),
+                descripcion=descripcion.strip() if descripcion else None,
                 precio=precio,
-                categoria=categoria,
+                categoria=categoria.strip() if categoria else None,
                 disponible=1 if disponible else 0,
-                receta=receta  # Se guarda automáticamente como JSON
+                receta=receta
             )
             db.add(nuevo_menu)
             db.commit()
             db.refresh(nuevo_menu)
             return nuevo_menu
-        except SQLAlchemyError as e:
+        except (SQLAlchemyError, ValueError) as e:
             db.rollback()
             raise Exception(f"Error al crear menú: {str(e)}")
     

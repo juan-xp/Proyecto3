@@ -18,10 +18,18 @@ class PedidoCRUD:
             Pedido creado o None si hay error
         """
         try:
+            # Validar que el cliente ID sea válido
+            if not cliente_id or cliente_id <= 0:
+                raise ValueError("Debe seleccionar un cliente válido")
+            
             # Verificar que el cliente existe
             cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
             if not cliente:
                 raise ValueError(f"Cliente con ID {cliente_id} no existe")
+            
+            # Validar que se hayan agregado productos
+            if not items or len(items) == 0:
+                raise ValueError("Debe agregar al menos un producto al pedido")
             
             # Crear el pedido
             nuevo_pedido = Pedido(cliente_id=cliente_id)
@@ -32,6 +40,14 @@ class PedidoCRUD:
             for item_data in items:
                 menu_id = item_data.get("menu_id")
                 cantidad = item_data.get("cantidad", 1)
+                
+                # Validar que menu_id exista
+                if not menu_id:
+                    raise ValueError("Falta el ID del menú en uno de los items")
+                
+                # Validar cantidad
+                if cantidad <= 0:
+                    raise ValueError(f"La cantidad debe ser mayor que cero")
                 
                 # Verificar que el menú existe
                 menu = db.query(Menu).filter(Menu.id == menu_id).first()
