@@ -9,6 +9,7 @@ class Cliente(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     rut = Column(String, unique=True, index=True, nullable=False)
     nombre = Column(String, nullable=False)
+    correo = Column(String, nullable=True)
     
     # Relaciones
     pedidos = relationship("Pedido", back_populates="cliente", cascade="all, delete-orphan")

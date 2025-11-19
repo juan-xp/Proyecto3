@@ -1,11 +1,13 @@
 import customtkinter as ctk
-from tkinter import messagebox, ttk
+from tkinter import messagebox, ttk, filedialog
 import json
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from database import get_session, engine, Base
 from crud.cliente_crud import ClienteCRUD
 from crud.ingrediente_crud import IngredienteCRUD
 from crud.menu_crud import MenuCRUD
 from crud.pedido_crud import PedidoCRUD
+from graficos import GraficosEstadisticos
 
 # Configuración de la ventana principal
 ctk.set_appearance_mode("System")
@@ -36,6 +38,9 @@ class App(ctk.CTk):
 
         self.tab_pedidos = self.tabview.add("Pedidos")
         self.crear_formulario_pedido(self.tab_pedidos)
+        
+        self.tab_graficos = self.tabview.add("Gráficos")
+        self.crear_formulario_graficos(self.tab_graficos)
 # Clientes
     def crear_formulario_cliente(self, parent):
         frame_superior = ctk.CTkFrame(parent)
@@ -48,6 +53,10 @@ class App(ctk.CTk):
         ctk.CTkLabel(frame_superior, text="Nombre").grid(row=0, column=2, pady=10, padx=10)
         self.entry_nombre_cliente = ctk.CTkEntry(frame_superior, width=200)
         self.entry_nombre_cliente.grid(row=0, column=3, pady=10, padx=10)
+        
+        ctk.CTkLabel(frame_superior, text="Correo").grid(row=0, column=4, pady=10, padx=10)
+        self.entry_correo_cliente = ctk.CTkEntry(frame_superior, width=200)
+        self.entry_correo_cliente.grid(row=0, column=5, pady=10, padx=10)
 
         ctk.CTkButton(frame_superior, text="Crear", command=self.crear_cliente).grid(row=1, column=0, pady=10, padx=5)
         ctk.CTkButton(frame_superior, text="Actualizar", command=self.actualizar_cliente).grid(row=1, column=1, pady=10, padx=5)
@@ -57,11 +66,13 @@ class App(ctk.CTk):
         frame_inferior = ctk.CTkFrame(parent)
         frame_inferior.pack(pady=10, padx=10, fill="both", expand=True)
 
-        self.treeview_clientes = ttk.Treeview(frame_inferior, columns=("ID", "RUT", "Nombre"), show="headings")
+        self.treeview_clientes = ttk.Treeview(frame_inferior, columns=("ID", "RUT", "Nombre", "Correo"), show="headings")
         self.treeview_clientes.heading("ID", text="ID")
         self.treeview_clientes.heading("RUT", text="RUT")
         self.treeview_clientes.heading("Nombre", text="Nombre")
+        self.treeview_clientes.heading("Correo", text="Correo")
         self.treeview_clientes.column("ID", width=50)
+        self.treeview_clientes.column("Correo", width=200)
         self.treeview_clientes.pack(pady=10, padx=10, fill="both", expand=True)
 
         self.cargar_clientes()
@@ -74,7 +85,7 @@ class App(ctk.CTk):
         try:
             clientes = ClienteCRUD.obtener_todos_clientes(db)
             for cliente in clientes:
-                self.treeview_clientes.insert("", "end", values=(cliente.id, cliente.rut, cliente.nombre))
+                self.treeview_clientes.insert("", "end", values=(cliente.id, cliente.rut, cliente.nombre, cliente.correo or ""))
         except Exception as e:
             messagebox.showerror("Error", f"Error al cargar clientes: {e}")
         finally:
@@ -83,14 +94,16 @@ class App(ctk.CTk):
     def crear_cliente(self):
         rut = self.entry_rut.get().strip()
         nombre = self.entry_nombre_cliente.get().strip()
+        correo = self.entry_correo_cliente.get().strip()
         if rut and nombre:
             db = next(get_session())
             try:
-                ClienteCRUD.crear_cliente(db, rut, nombre)
+                ClienteCRUD.crear_cliente(db, rut, nombre, correo if correo else None)
                 messagebox.showinfo("Éxito", "Cliente creado correctamente.")
                 self.cargar_clientes()
                 self.entry_rut.delete(0, 'end')
                 self.entry_nombre_cliente.delete(0, 'end')
+                self.entry_correo_cliente.delete(0, 'end')
             except Exception as e:
                 messagebox.showerror("Error", str(e))
             finally:
@@ -106,10 +119,16 @@ class App(ctk.CTk):
         cliente_id = self.treeview_clientes.item(selected)["values"][0]
         rut = self.entry_rut.get().strip()
         nombre = self.entry_nombre_cliente.get().strip()
+        correo = self.entry_correo_cliente.get().strip()
         
         db = next(get_session())
         try:
-            ClienteCRUD.actualizar_cliente(db, cliente_id, rut if rut else None, nombre if nombre else None)
+            ClienteCRUD.actualizar_cliente(
+                db, cliente_id, 
+                rut if rut else None, 
+                nombre if nombre else None,
+                correo if correo else None
+            )
             messagebox.showinfo("Éxito", "Cliente actualizado.")
             self.cargar_clientes()
         except Exception as e:
@@ -153,6 +172,7 @@ class App(ctk.CTk):
         ctk.CTkButton(frame_superior, text="Actualizar", command=self.actualizar_ingrediente).grid(row=1, column=1, pady=10, padx=5)
         ctk.CTkButton(frame_superior, text="Eliminar", command=self.eliminar_ingrediente).grid(row=1, column=2, pady=10, padx=5)
         ctk.CTkButton(frame_superior, text="Refrescar", command=self.cargar_ingredientes).grid(row=1, column=3, pady=10, padx=5)
+        ctk.CTkButton(frame_superior, text="Cargar CSV", command=self.cargar_csv_ingredientes).grid(row=1, column=4, pady=10, padx=5)
 
         frame_inferior = ctk.CTkFrame(parent)
         frame_inferior.pack(pady=10, padx=10, fill="both", expand=True)
@@ -430,6 +450,135 @@ class App(ctk.CTk):
             self.cargar_pedidos()
         except Exception as e:
             messagebox.showerror("Error", str(e))
+        finally:
+            db.close()
+    
+    # Cargar CSV de ingredientes
+    def cargar_csv_ingredientes(self):
+        """Carga ingredientes desde un archivo CSV"""
+        archivo = filedialog.askopenfilename(
+            title="Seleccionar archivo CSV",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+        )
+        
+        if not archivo:
+            return
+        
+        db = next(get_session())
+        try:
+            resultados = IngredienteCRUD.cargar_desde_csv(db, archivo)
+            
+            # Mostrar resumen de la carga
+            mensaje = f"Carga completada:\n"
+            mensaje += f"✓ Exitosos: {resultados['exitosos']}\n"
+            mensaje += f"✗ Errores: {resultados['errores']}\n\n"
+            
+            if resultados['mensajes']:
+                mensaje += "Detalles:\n"
+                # Mostrar solo los primeros 10 mensajes
+                for msg in resultados['mensajes'][:10]:
+                    mensaje += f"• {msg}\n"
+                if len(resultados['mensajes']) > 10:
+                    mensaje += f"... y {len(resultados['mensajes']) - 10} más"
+            
+            messagebox.showinfo("Carga CSV", mensaje)
+            self.cargar_ingredientes()
+            
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+        finally:
+            db.close()
+
+    # Gráficos
+    def crear_formulario_graficos(self, parent):
+        """Crea la interfaz para mostrar gráficos estadísticos"""
+        # Frame superior con controles
+        frame_controles = ctk.CTkFrame(parent)
+        frame_controles.pack(pady=10, padx=10, fill="x")
+        
+        ctk.CTkLabel(frame_controles, text="Seleccionar Gráfico:", font=("Arial", 14, "bold")).grid(row=0, column=0, pady=10, padx=10)
+        
+        self.combo_graficos = ctk.CTkComboBox(
+            frame_controles,
+            values=["Ventas por Fecha", "Menús Más Vendidos", "Uso de Ingredientes"],
+            width=200
+        )
+        self.combo_graficos.set("Ventas por Fecha")
+        self.combo_graficos.grid(row=0, column=1, pady=10, padx=10)
+        
+        # ComboBox para periodo (solo visible para ventas)
+        ctk.CTkLabel(frame_controles, text="Periodo:").grid(row=0, column=2, pady=10, padx=10)
+        self.combo_periodo = ctk.CTkComboBox(
+            frame_controles,
+            values=["diario", "semanal", "mensual", "anual"],
+            width=120
+        )
+        self.combo_periodo.set("diario")
+        self.combo_periodo.grid(row=0, column=3, pady=10, padx=10)
+        
+        ctk.CTkButton(
+            frame_controles,
+            text="Generar Gráfico",
+            command=self.generar_grafico
+        ).grid(row=0, column=4, pady=10, padx=10)
+        
+        # Frame para el gráfico
+        self.frame_grafico = ctk.CTkFrame(parent)
+        self.frame_grafico.pack(pady=10, padx=10, fill="both", expand=True)
+        
+        # Label de información
+        self.label_info_grafico = ctk.CTkLabel(
+            self.frame_grafico,
+            text="Seleccione un tipo de gráfico y presione 'Generar Gráfico'",
+            font=("Arial", 12)
+        )
+        self.label_info_grafico.pack(pady=50)
+    
+    def generar_grafico(self):
+        """Genera el gráfico seleccionado"""
+        # Limpiar frame de gráfico
+        for widget in self.frame_grafico.winfo_children():
+            widget.destroy()
+        
+        tipo_grafico = self.combo_graficos.get()
+        db = next(get_session())
+        
+        try:
+            fig = None
+            error = None
+            
+            if tipo_grafico == "Ventas por Fecha":
+                periodo = self.combo_periodo.get()
+                fig, error = GraficosEstadisticos.graficar_ventas_por_fecha(db, periodo)
+            elif tipo_grafico == "Menús Más Vendidos":
+                fig, error = GraficosEstadisticos.graficar_distribucion_menus(db)
+            elif tipo_grafico == "Uso de Ingredientes":
+                fig, error = GraficosEstadisticos.graficar_uso_ingredientes(db)
+            
+            if error:
+                # Mostrar mensaje de error
+                label_error = ctk.CTkLabel(
+                    self.frame_grafico,
+                    text=error,
+                    font=("Arial", 12),
+                    text_color="red"
+                )
+                label_error.pack(pady=50)
+            elif fig:
+                # Mostrar gráfico
+                canvas = FigureCanvasTkAgg(fig, master=self.frame_grafico)
+                canvas.draw()
+                canvas.get_tk_widget().pack(fill="both", expand=True)
+            else:
+                label_error = ctk.CTkLabel(
+                    self.frame_grafico,
+                    text="No se pudo generar el gráfico",
+                    font=("Arial", 12)
+                )
+                label_error.pack(pady=50)
+                
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al generar gráfico: {str(e)}")
         finally:
             db.close()
 

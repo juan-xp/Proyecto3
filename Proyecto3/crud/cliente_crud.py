@@ -2,18 +2,43 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from models import Cliente
 from typing import Optional, List
+import re
 
 class ClienteCRUD:
     @staticmethod
-    def crear_cliente(db: Session, rut: str, nombre: str) -> Optional[Cliente]:
+    def validar_correo(correo: str) -> bool:
+        """Valida el formato del correo electrónico"""
+        if not correo:
+            return True  # Correo es opcional
+        patron = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        return re.match(patron, correo) is not None
+    
+    @staticmethod
+    def crear_cliente(db: Session, rut: str, nombre: str, correo: str = None) -> Optional[Cliente]:
         """Crea un nuevo cliente"""
         try:
+            # Validar que nombre y rut no estén vacíos
+            if not rut or not rut.strip():
+                raise ValueError("El RUT no puede estar vacío")
+            if not nombre or not nombre.strip():
+                raise ValueError("El nombre no puede estar vacío")
+            
+            # Validar formato de correo
+            if correo and not ClienteCRUD.validar_correo(correo):
+                raise ValueError("Formato de correo electrónico inválido")
+            
             # Verificar si el RUT ya existe
             cliente_existente = db.query(Cliente).filter(Cliente.rut == rut).first()
             if cliente_existente:
                 raise ValueError(f"El cliente con RUT '{rut}' ya existe")
             
-            nuevo_cliente = Cliente(rut=rut, nombre=nombre)
+            # Verificar si el correo ya existe (si se proporciona)
+            if correo:
+                correo_existente = db.query(Cliente).filter(Cliente.correo == correo).first()
+                if correo_existente:
+                    raise ValueError(f"El correo '{correo}' ya está registrado")
+            
+            nuevo_cliente = Cliente(rut=rut.strip(), nombre=nombre.strip(), correo=correo.strip() if correo else None)
             db.add(nuevo_cliente)
             db.commit()
             db.refresh(nuevo_cliente)
@@ -48,7 +73,7 @@ class ClienteCRUD:
     
     @staticmethod
     def actualizar_cliente(db: Session, cliente_id: int, rut: str = None, 
-                          nombre: str = None) -> Optional[Cliente]:
+                          nombre: str = None, correo: str = None) -> Optional[Cliente]:
         """Actualiza los datos de un cliente"""
         try:
             cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
@@ -56,6 +81,8 @@ class ClienteCRUD:
                 return None
             
             if rut is not None:
+                if not rut.strip():
+                    raise ValueError("El RUT no puede estar vacío")
                 # Verificar que el nuevo RUT no esté en uso
                 rut_existente = db.query(Cliente).filter(
                     Cliente.rut == rut,
@@ -63,10 +90,25 @@ class ClienteCRUD:
                 ).first()
                 if rut_existente:
                     raise ValueError(f"El RUT '{rut}' ya está en uso")
-                cliente.rut = rut
+                cliente.rut = rut.strip()
             
             if nombre is not None:
-                cliente.nombre = nombre
+                if not nombre.strip():
+                    raise ValueError("El nombre no puede estar vacío")
+                cliente.nombre = nombre.strip()
+            
+            if correo is not None:
+                if correo.strip() and not ClienteCRUD.validar_correo(correo):
+                    raise ValueError("Formato de correo electrónico inválido")
+                # Verificar que el correo no esté en uso
+                if correo.strip():
+                    correo_existente = db.query(Cliente).filter(
+                        Cliente.correo == correo,
+                        Cliente.id != cliente_id
+                    ).first()
+                    if correo_existente:
+                        raise ValueError(f"El correo '{correo}' ya está en uso")
+                cliente.correo = correo.strip() if correo.strip() else None
             
             db.commit()
             db.refresh(cliente)

@@ -1,2 +1,3 @@
-pip install SQLAlchemy
-pip install matplotlib
+SQLAlchemy
+matplotlib
+customtkinter
